@@ -5,7 +5,8 @@ import SwiftUI
 struct VacationCalendarView: View {
     @Environment(GuardiasStore.self) private var store
     let worker: Worker
-    @State private var selectionStart: Date? = nil
+    @State private var selectionStart: Date? = nil   // add-range mode
+    @State private var deleteStart: Date? = nil       // delete-range mode
     @State private var showSettings = false
 
     private var yearStart: Date {
@@ -14,19 +15,30 @@ struct VacationCalendarView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // ── Legend ────────────────────────────────────────────────
+        VStack(spacing: 0) {
+            // ── Sticky header (legend + banner) ───────────────────────────
+            VStack(alignment: .leading, spacing: 8) {
                 VacationLegendCard(worker: worker)
 
-                // ── Selection hint ────────────────────────────────────────
                 if let start = selectionStart {
-                    SelectionHintBanner(startDate: start) {
+                    SelectionHintBanner(mode: .add, startDate: start) {
                         selectionStart = nil
                     }
+                } else if let start = deleteStart {
+                    SelectionHintBanner(mode: .delete, startDate: start) {
+                        deleteStart = nil
+                    }
                 }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
+            .background(Color(nsColor: .windowBackgroundColor))
 
-                // ── Month cards ───────────────────────────────────────────
+            Divider()
+
+            // ── Scrollable months ─────────────────────────────────────────
+            ScrollView {
                 LazyVStack(spacing: 20) {
                     ForEach(0..<12, id: \.self) { offset in
                         if let month = Calendar.current.date(
@@ -35,13 +47,14 @@ struct VacationCalendarView: View {
                             VacationMonthCard(
                                 month: month,
                                 worker: worker,
-                                selectionStart: $selectionStart
+                                selectionStart: $selectionStart,
+                                deleteStart: $deleteStart
                             )
                         }
                     }
                 }
+                .padding(24)
             }
-            .padding(24)
         }
         .navigationTitle("Vacaciones — \(worker.name)")
         .toolbar {
@@ -64,27 +77,15 @@ struct VacationLegendCard: View {
     let worker: Worker
 
     var body: some View {
-        HStack(spacing: 28) {
-            LegendSwatch(
-                fill: .red.opacity(0.18),
-                border: .red.opacity(0.45),
-                text: "Vacaciones",
-                textColor: .red
-            )
-            LegendSwatch(
-                fill: worker.color.opacity(0.15),
-                border: worker.color.opacity(0.40),
-                text: "En guardia",
-                textColor: worker.color
-            )
-            LegendSwatch(
-                fill: .clear,
-                border: .primary.opacity(0.35),
-                text: "Hoy",
-                textColor: .primary
-            )
+        HStack(spacing: 24) {
+            LegendSwatch(fill: .red.opacity(0.18), border: .red.opacity(0.45),
+                         text: "Vacaciones", textColor: .red)
+            LegendSwatch(fill: worker.color.opacity(0.15), border: worker.color.opacity(0.40),
+                         text: "En guardia", textColor: worker.color)
+            LegendSwatch(fill: .clear, border: .primary.opacity(0.35),
+                         text: "Hoy", textColor: .primary)
             Spacer()
-            Text("Clic para seleccionar · Clic derecho para eliminar")
+            Text("Clic en día libre: añadir · Clic en vacaciones: eliminar rango · Clic derecho: eliminar día")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -109,10 +110,7 @@ struct LegendSwatch: View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 5)
                 .fill(fill)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(border, lineWidth: 1.5)
-                )
+                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1.5))
                 .frame(width: 28, height: 24)
             Text(text)
                 .font(.callout)
@@ -124,14 +122,16 @@ struct LegendSwatch: View {
 // MARK: – Selection hint banner
 
 struct SelectionHintBanner: View {
+    enum Mode { case add, delete }
+    let mode: Mode
     let startDate: Date
     let onCancel: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "dot.circle")
-                .foregroundStyle(.blue)
-            Text("Inicio: **\(formattedDate)**  —  Haz clic en otro día para marcar el rango, o en el mismo para marcar solo ese día.")
+            Image(systemName: mode == .add ? "dot.circle" : "minus.circle.fill")
+                .foregroundStyle(mode == .add ? Color.blue : Color.red)
+            Text(bannerText)
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -141,12 +141,24 @@ struct SelectionHintBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color.blue.opacity(0.08))
+        .background(mode == .add ? Color.blue.opacity(0.08) : Color.red.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.blue.opacity(0.25), lineWidth: 1)
+                .strokeBorder(
+                    mode == .add ? Color.blue.opacity(0.25) : Color.red.opacity(0.35),
+                    lineWidth: 1
+                )
         )
+    }
+
+    private var bannerText: String {
+        switch mode {
+        case .add:
+            return "Inicio: **\(formattedDate)**  —  Clic en otro día para marcar el rango, o en el mismo para marcar solo ese día."
+        case .delete:
+            return "Inicio: **\(formattedDate)**  —  Clic en otro día para eliminar el rango de vacaciones, o en el mismo para eliminar solo ese día."
+        }
     }
 
     private var formattedDate: String {
@@ -164,6 +176,7 @@ struct VacationMonthCard: View {
     let month: Date
     let worker: Worker
     @Binding var selectionStart: Date?
+    @Binding var deleteStart: Date?
 
     private let dayLetters = ["L", "M", "X", "J", "V", "S", "D"]
 
@@ -174,7 +187,6 @@ struct VacationMonthCard: View {
                 .fontWeight(.semibold)
                 .padding(.bottom, 2)
 
-            // Weekday headers
             HStack(spacing: 0) {
                 ForEach(Array(dayLetters.enumerated()), id: \.offset) { _, letter in
                     Text(letter)
@@ -185,7 +197,6 @@ struct VacationMonthCard: View {
                 }
             }
 
-            // Calendar grid (rows × 7)
             let days = daysInMonth()
             let offset = firstWeekdayOffset
             let totalCells = offset + days.count
@@ -200,7 +211,8 @@ struct VacationMonthCard: View {
                                 DayCell(
                                     date: days[idx],
                                     worker: worker,
-                                    selectionStart: $selectionStart
+                                    selectionStart: $selectionStart,
+                                    deleteStart: $deleteStart
                                 )
                             } else {
                                 Color.clear
@@ -220,8 +232,6 @@ struct VacationMonthCard: View {
                 .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
         )
     }
-
-    // MARK: Helpers
 
     private var monthTitle: String {
         let fmt = DateFormatter()
@@ -255,19 +265,21 @@ struct DayCell: View {
     let date: Date
     let worker: Worker
     @Binding var selectionStart: Date?
+    @Binding var deleteStart: Date?
 
     private var isVacation: Bool { store.isVacation(date, for: worker) }
     private var isOnGuard: Bool {
         store.assignment(for: date.startOfWeek)?.workerId == worker.id
     }
     private var isPendingStart: Bool { selectionStart?.isSameDay(as: date) == true }
+    private var isDeleteStart: Bool { deleteStart?.isSameDay(as: date) == true }
     private var isToday: Bool { date.isToday }
 
     var body: some View {
         Button(action: handleTap) {
             Text("\(Calendar.current.component(.day, from: date))")
                 .font(.callout)
-                .fontWeight(isToday || isPendingStart ? .semibold : .regular)
+                .fontWeight(isToday || isPendingStart || isDeleteStart ? .semibold : .regular)
                 .frame(maxWidth: .infinity)
                 .frame(height: 36)
                 .foregroundStyle(foregroundColor)
@@ -283,17 +295,21 @@ struct DayCell: View {
             if isVacation {
                 Button(role: .destructive) {
                     store.removeVacationDay(date, for: worker)
-                    selectionStart = nil
+                    deleteStart = nil
                 } label: {
-                    Label("Eliminar vacaciones", systemImage: "trash")
+                    Label("Eliminar este día", systemImage: "trash")
                 }
             }
             if isPendingStart {
                 Divider()
-                Button {
-                    selectionStart = nil
-                } label: {
+                Button { selectionStart = nil } label: {
                     Label("Cancelar selección", systemImage: "xmark.circle")
+                }
+            }
+            if isDeleteStart {
+                Divider()
+                Button { deleteStart = nil } label: {
+                    Label("Cancelar eliminación", systemImage: "xmark.circle")
                 }
             }
         }
@@ -302,6 +318,7 @@ struct DayCell: View {
     // MARK: – Tap logic
 
     private func handleTap() {
+        // Complete an ADD range
         if let start = selectionStart {
             if start.isSameDay(as: date) {
                 store.addVacationRange(from: date, to: date, for: worker)
@@ -309,10 +326,25 @@ struct DayCell: View {
                 store.addVacationRange(from: start, to: date, for: worker)
             }
             selectionStart = nil
-        } else if !isVacation {
-            // Only start a selection on days that are NOT already vacation.
-            // Already-vacation days are deleted via right-click → "Eliminar".
-            selectionStart = date
+            return
+        }
+
+        // Complete a DELETE range
+        if let start = deleteStart {
+            if start.isSameDay(as: date) {
+                store.removeVacationRange(from: date, to: date, for: worker)
+            } else {
+                store.removeVacationRange(from: start, to: date, for: worker)
+            }
+            deleteStart = nil
+            return
+        }
+
+        // Start a new selection
+        if isVacation {
+            deleteStart = date      // vacation day → delete-range mode (red banner)
+        } else {
+            selectionStart = date   // free day → add-range mode (blue banner)
         }
     }
 
@@ -320,6 +352,7 @@ struct DayCell: View {
 
     private var foregroundColor: Color {
         if isPendingStart { return .white }
+        if isDeleteStart { return .red }
         if isVacation { return .red }
         if isOnGuard { return worker.color }
         return .primary
@@ -327,6 +360,7 @@ struct DayCell: View {
 
     private var backgroundColor: Color {
         if isPendingStart { return .blue }
+        if isDeleteStart { return .red.opacity(0.28) }
         if isVacation { return .red.opacity(0.18) }
         if isOnGuard { return worker.color.opacity(0.15) }
         return .clear
@@ -334,6 +368,7 @@ struct DayCell: View {
 
     private var borderColor: Color {
         if isPendingStart { return .blue }
+        if isDeleteStart { return .red }
         if isToday { return .primary.opacity(0.35) }
         if isVacation { return .red.opacity(0.35) }
         if isOnGuard { return worker.color.opacity(0.3) }
@@ -341,7 +376,7 @@ struct DayCell: View {
     }
 
     private var borderWidth: CGFloat {
-        if isPendingStart || isToday { return 2 }
+        if isPendingStart || isDeleteStart || isToday { return 2 }
         if isVacation || isOnGuard { return 1 }
         return 0
     }

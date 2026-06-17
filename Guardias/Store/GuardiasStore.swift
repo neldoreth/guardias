@@ -143,6 +143,19 @@ final class GuardiasStore {
         saveAndRecompute()
     }
 
+    /// Removes all vacation days in [startDate, endDate] (inclusive).
+    func removeVacationRange(from startDate: Date, to endDate: Date, for worker: Worker) {
+        let lo = min(startDate, endDate).startOfDay
+        let hi = max(startDate, endDate).startOfDay
+        var days = appData.vacationDays(for: worker.id)
+        days.removeAll { day in
+            let d = day.startOfDay
+            return d >= lo && d <= hi
+        }
+        appData.setVacationDays(days, for: worker.id)
+        saveAndRecompute()
+    }
+
     // MARK: – Manual assignments
 
     func setManualAssignment(weekStart: Date, workerId: UUID) {

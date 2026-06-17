@@ -3,8 +3,6 @@ import SwiftUI
 struct ContentView: View {
     @Environment(GuardiasStore.self) private var store
     @State private var selection: SidebarItem? = .calendar
-    @State private var showSettings = false
-
     enum SidebarItem: Hashable {
         case calendar
         case worker(UUID)
@@ -35,16 +33,6 @@ struct ContentView: View {
             }
             .listStyle(.sidebar)
             .navigationTitle("Guardias")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .help("Ajustes")
-                }
-            }
         } detail: {
             switch selection ?? .calendar {
             case .calendar:
@@ -56,10 +44,6 @@ struct ContentView: View {
                     GuardCalendarView()
                 }
             }
-        }
-        .sheet(isPresented: $showSettings) {
-            SettingsView()
-                .environment(store)
         }
     }
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct WeekRowView: View {
     @Environment(GuardiasStore.self) private var store
@@ -6,6 +7,7 @@ struct WeekRowView: View {
 
     @State private var showManualAssign = false
     @State private var showSwap = false
+    @State private var isDropTargeted = false
 
     private var assignment: GuardAssignment? { store.assignment(for: weekStart) }
     private var worker: Worker? { assignment.flatMap { store.worker(id: $0.workerId) } }
@@ -14,13 +16,11 @@ struct WeekRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             // Week range label
-            VStack(alignment: .leading, spacing: 2) {
-                Text(weekRangeText)
-                    .font(.callout)
-                    .foregroundStyle(isCurrentWeek ? .primary : .secondary)
-                    .fontWeight(isCurrentWeek ? .semibold : .regular)
-            }
-            .frame(width: 160, alignment: .leading)
+            Text(weekRangeText)
+                .font(.callout)
+                .foregroundStyle(isCurrentWeek ? .primary : .secondary)
+                .fontWeight(isCurrentWeek ? .semibold : .regular)
+                .frame(width: 160, alignment: .leading)
 
             // Assignment pill
             if let worker {
@@ -35,7 +35,6 @@ struct WeekRowView: View {
 
             Spacer()
 
-            // Current week indicator
             if isCurrentWeek {
                 Image(systemName: "clock.fill")
                     .font(.caption)
@@ -54,8 +53,41 @@ struct WeekRowView: View {
                     )
             }
         }
+        // ── Drop target highlight ─────────────────────────────────────────
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(.blue, lineWidth: 2)
+            }
+        }
+        // ── Drag source ───────────────────────────────────────────────────
+        .onDrag {
+            NSItemProvider(object: weekStart.timeIntervalSince1970.description as NSString)
+        }
+        // ── Drop target ───────────────────────────────────────────────────
+        .onDrop(of: [.plainText], isTargeted: $isDropTargeted, perform: handleDrop)
+        // ── Context menu (kept alongside drag) ────────────────────────────
         .contextMenu {
-            contextMenuContent
+            Button {
+                showManualAssign = true
+            } label: {
+                Label("Asignar manualmente…", systemImage: "hand.point.up.left")
+            }
+
+            Button {
+                showSwap = true
+            } label: {
+                Label("Cambio de guardia…", systemImage: "arrow.2.squarepath")
+            }
+
+            if assignment?.isManual == true {
+                Divider()
+                Button(role: .destructive) {
+                    store.removeManualAssignment(weekStart: weekStart)
+                } label: {
+                    Label("Eliminar asignación manual", systemImage: "trash")
+                }
+            }
         }
         .sheet(isPresented: $showManualAssign) {
             ManualAssignSheet(weekStart: weekStart)
@@ -67,28 +99,19 @@ struct WeekRowView: View {
         }
     }
 
-    @ViewBuilder
-    private var contextMenuContent: some View {
-        Button {
-            showManualAssign = true
-        } label: {
-            Label("Asignar manualmente…", systemImage: "hand.point.up.left")
-        }
+    // MARK: – Drag-and-drop handler
 
-        Button {
-            showSwap = true
-        } label: {
-            Label("Cambio de guardia…", systemImage: "arrow.2.squarepath")
-        }
-
-        if assignment?.isManual == true {
-            Divider()
-            Button(role: .destructive) {
-                store.removeManualAssignment(weekStart: weekStart)
-            } label: {
-                Label("Eliminar asignación manual", systemImage: "trash")
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        providers.first?.loadObject(ofClass: NSString.self) { item, _ in
+            guard let str = item as? String,
+                  let timestamp = Double(str) else { return }
+            let sourceWeek = Date(timeIntervalSince1970: timestamp)
+            guard !sourceWeek.isSameWeek(as: weekStart) else { return }
+            Task { @MainActor in
+                store.swapWeeks(sourceWeek: sourceWeek, targetWeek: weekStart)
             }
         }
+        return true
     }
 
     // MARK: – Formatting
@@ -102,6 +125,8 @@ struct WeekRowView: View {
         return "\(start) – \(end)"
     }
 }
+
+// MARK: – Assignment pill
 
 struct AssignmentPill: View {
     let worker: Worker
@@ -118,8 +143,7 @@ struct AssignmentPill: View {
                     .font(.callout)
                     .fontWeight(.medium)
 
-                if let swap = assignment?.swapInfo,
-                   let _ = swap.originalWorkerId as UUID? {
+                if assignment?.swapInfo != nil {
                     Text("Cambio")
                         .font(.caption2)
                         .foregroundStyle(.secondary)

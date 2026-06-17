@@ -152,6 +152,38 @@ final class GuardiasStore {
         saveAndRecompute()
     }
 
+    // MARK: – Drag-and-drop week swap
+
+    /// Swaps the guard assignments of two weeks. Both become manual overrides.
+    func swapWeeks(sourceWeek: Date, targetWeek: Date) {
+        let src = assignment(for: sourceWeek)
+        let tgt = assignment(for: targetWeek)
+        let swapDate = Date()
+
+        appData.manualAssignments.removeAll {
+            $0.weekStart.isSameWeek(as: sourceWeek) || $0.weekStart.isSameWeek(as: targetWeek)
+        }
+
+        if let fromId = src?.workerId, let toId = tgt?.workerId {
+            // Full mutual swap
+            appData.manualAssignments.append(GuardAssignment(
+                weekStart: sourceWeek, workerId: toId, isManual: true,
+                swapInfo: .init(originalWorkerId: fromId, newWorkerId: toId, swapDate: swapDate)
+            ))
+            appData.manualAssignments.append(GuardAssignment(
+                weekStart: targetWeek, workerId: fromId, isManual: true,
+                swapInfo: .init(originalWorkerId: toId, newWorkerId: fromId, swapDate: swapDate)
+            ))
+        } else if let fromId = src?.workerId {
+            // Move source worker to target week
+            appData.manualAssignments.append(GuardAssignment(
+                weekStart: targetWeek, workerId: fromId, isManual: true
+            ))
+        }
+
+        saveAndRecompute()
+    }
+
     // MARK: – Lookup helpers
 
     func assignment(for weekStart: Date) -> GuardAssignment? {

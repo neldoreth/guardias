@@ -1,0 +1,191 @@
+import Foundation
+import Observation
+
+@Observable
+@MainActor
+final class GuardiasStore {
+
+    // MARK: – State
+
+    var appData: AppData = AppData()
+    /// Full computed schedule (manual + auto). Rebuilt whenever data changes.
+    private(set) var schedule: [GuardAssignment] = []
+
+    // MARK: – Persistence
+
+    private let dataURL: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let dir = appSupport.appendingPathComponent("Guardias", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("data.json")
+    }()
+
+    private var encoder: JSONEncoder {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = .prettyPrinted
+        return e
+    }
+
+    private var decoder: JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }
+
+    init() {
+        load()
+        recompute()
+    }
+
+    // MARK: – Recompute
+
+    func recompute() {
+        let vacations = Dictionary(
+            uniqueKeysWithValues: appData.workers.map { worker in
+                (worker.id, appData.vacationDays(for: worker.id))
+            }
+        )
+        schedule = SchedulingEngine.compute(
+            workers: appData.workers,
+            manualAssignments: appData.manualAssignments,
+            vacations: vacations,
+            settings: appData.settings
+        )
+    }
+
+    // MARK: – Persistence
+
+    func save() {
+        do {
+            let data = try encoder.encode(appData)
+            try data.write(to: dataURL, options: .atomic)
+        } catch {
+            print("[Guardias] Save error: \(error)")
+        }
+    }
+
+    private func load() {
+        guard FileManager.default.fileExists(atPath: dataURL.path),
+              let data = try? Data(contentsOf: dataURL),
+              let loaded = try? decoder.decode(AppData.self, from: data) else { return }
+        appData = loaded
+    }
+
+    // MARK: – Workers
+
+    func addWorker(name: String) {
+        let colorIndex = appData.workers.count % Worker.palette.count
+        appData.workers.append(Worker(name: name, colorIndex: colorIndex))
+        saveAndRecompute()
+    }
+
+    func removeWorker(_ worker: Worker) {
+        appData.workers.removeAll { $0.id == worker.id }
+        appData.manualAssignments.removeAll { $0.workerId == worker.id }
+        appData.vacations.removeValue(forKey: worker.id.uuidString)
+        saveAndRecompute()
+    }
+
+    func updateWorker(_ worker: Worker) {
+        guard let idx = appData.workers.firstIndex(where: { $0.id == worker.id }) else { return }
+        appData.workers[idx] = worker
+        saveAndRecompute()
+    }
+
+    func moveWorkers(from source: IndexSet, to destination: Int) {
+        appData.workers.move(fromOffsets: source, toOffset: destination)
+        saveAndRecompute()
+    }
+
+    // MARK: – Vacations
+
+    func toggleVacationDay(_ date: Date, for worker: Worker) {
+        var days = appData.vacationDays(for: worker.id)
+        if let idx = days.firstIndex(where: { $0.isSameDay(as: date) }) {
+            days.remove(at: idx)
+        } else {
+            days.append(date.startOfDay)
+        }
+        appData.setVacationDays(days, for: worker.id)
+        saveAndRecompute()
+    }
+
+    func vacationDays(for worker: Worker) -> [Date] {
+        appData.vacationDays(for: worker.id)
+    }
+
+    func isVacation(_ date: Date, for worker: Worker) -> Bool {
+        appData.vacationDays(for: worker.id).contains { $0.isSameDay(as: date) }
+    }
+
+    // MARK: – Manual assignments
+
+    func setManualAssignment(weekStart: Date, workerId: UUID) {
+        let assignment = GuardAssignment(weekStart: weekStart, workerId: workerId, isManual: true)
+        appData.manualAssignments.removeAll { $0.weekStart.isSameWeek(as: weekStart) }
+        appData.manualAssignments.append(assignment)
+        saveAndRecompute()
+    }
+
+    func removeManualAssignment(weekStart: Date) {
+        appData.manualAssignments.removeAll { $0.weekStart.isSameWeek(as: weekStart) }
+        saveAndRecompute()
+    }
+
+    // MARK: – Swap
+
+    func swapGuard(weekStart: Date, originalWorkerId: UUID, newWorkerId: UUID) {
+        let swapInfo = GuardAssignment.SwapInfo(
+            originalWorkerId: originalWorkerId,
+            newWorkerId: newWorkerId,
+            swapDate: Date()
+        )
+        let assignment = GuardAssignment(
+            weekStart: weekStart,
+            workerId: newWorkerId,
+            isManual: true,
+            swapInfo: swapInfo
+        )
+        appData.manualAssignments.removeAll { $0.weekStart.isSameWeek(as: weekStart) }
+        appData.manualAssignments.append(assignment)
+        saveAndRecompute()
+    }
+
+    // MARK: – Lookup helpers
+
+    func assignment(for weekStart: Date) -> GuardAssignment? {
+        schedule.first { $0.weekStart.isSameWeek(as: weekStart) }
+    }
+
+    func worker(id: UUID) -> Worker? {
+        appData.workers.first { $0.id == id }
+    }
+
+    // MARK: – Backup
+
+    func exportData() -> Data? {
+        try? encoder.encode(appData)
+    }
+
+    func importData(_ data: Data) -> Bool {
+        guard let loaded = try? decoder.decode(AppData.self, from: data) else { return false }
+        appData = loaded
+        saveAndRecompute()
+        return true
+    }
+
+    // MARK: – Settings shortcut
+
+    func updateSettings(_ settings: AppSettings) {
+        appData.settings = settings
+        saveAndRecompute()
+    }
+
+    // MARK: – Private
+
+    private func saveAndRecompute() {
+        save()
+        recompute()
+    }
+}

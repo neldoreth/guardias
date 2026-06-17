@@ -1,0 +1,52 @@
+name: Guardias
+options:
+  bundleIdPrefix: com.guardias
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  defaultConfig: Debug
+  groupSortPosition: top
+  generateEmptyDirectories: true
+
+configs:
+  Debug: debug
+  Release: release
+
+targets:
+  Guardias:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Guardias
+        excludes:
+          - Resources/Assets.xcassets
+    resources:
+      - path: Guardias/Resources/Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.guardias.app
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.9"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Guardias/Guardias.entitlements
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_INCLUDE_ALL_MACOS_SIZES: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks"
+        COMBINE_HIDPI_IMAGES: YES
+      Debug:
+        DEBUG_INFORMATION_FORMAT: dwarf
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      Release:
+        DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+    info:
+      path: Guardias/Info.plist
+      properties:
+        CFBundleName: Guardias
+        CFBundleDisplayName: Guardias
+        NSHumanReadableCopyright: "Copyright © 2026. All rights reserved."
+        LSMinimumSystemVersion: "14.0"
+        NSPrincipalClass: NSApplication

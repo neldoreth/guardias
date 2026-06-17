@@ -304,15 +304,14 @@ struct DayCell: View {
     private func handleTap() {
         if let start = selectionStart {
             if start.isSameDay(as: date) {
-                // Second click on same day → mark just this day
                 store.addVacationRange(from: date, to: date, for: worker)
             } else {
-                // Click on different day → mark the range [start, date]
                 store.addVacationRange(from: start, to: date, for: worker)
             }
             selectionStart = nil
-        } else {
-            // First click → start selection (don't mark yet)
+        } else if !isVacation {
+            // Only start a selection on days that are NOT already vacation.
+            // Already-vacation days are deleted via right-click → "Eliminar".
             selectionStart = date
         }
     }

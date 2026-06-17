@@ -1,12 +1,13 @@
 import SwiftUI
 
+enum SidebarItem: Hashable {
+    case calendar
+    case worker(UUID)
+}
+
 struct ContentView: View {
     @Environment(GuardiasStore.self) private var store
-    @State private var selection: SidebarItem? = .calendar
-    enum SidebarItem: Hashable {
-        case calendar
-        case worker(UUID)
-    }
+    @State private var selection: SidebarItem = .calendar
 
     var body: some View {
         NavigationSplitView {
@@ -34,15 +35,20 @@ struct ContentView: View {
             .listStyle(.sidebar)
             .navigationTitle("Guardias")
         } detail: {
-            switch selection ?? .calendar {
-            case .calendar:
+            detailView
+        }
+    }
+
+    @ViewBuilder
+    private var detailView: some View {
+        switch selection {
+        case .calendar:
+            GuardCalendarView()
+        case .worker(let id):
+            if let worker = store.worker(id: id) {
+                VacationCalendarView(worker: worker)
+            } else {
                 GuardCalendarView()
-            case .worker(let id):
-                if let worker = store.worker(id: id) {
-                    VacationCalendarView(worker: worker)
-                } else {
-                    GuardCalendarView()
-                }
             }
         }
     }

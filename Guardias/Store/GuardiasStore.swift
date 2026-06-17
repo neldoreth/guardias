@@ -119,6 +119,30 @@ final class GuardiasStore {
         appData.vacationDays(for: worker.id).contains { $0.isSameDay(as: date) }
     }
 
+    /// Adds all days in [startDate, endDate] as vacation (inclusive). Safe to call with startDate == endDate.
+    func addVacationRange(from startDate: Date, to endDate: Date, for worker: Worker) {
+        var days = appData.vacationDays(for: worker.id)
+        var current = min(startDate, endDate).startOfDay
+        let end = max(startDate, endDate).startOfDay
+        while current <= end {
+            if !days.contains(where: { $0.isSameDay(as: current) }) {
+                days.append(current)
+            }
+            guard let next = Calendar.current.date(byAdding: .day, value: 1, to: current) else { break }
+            current = next
+        }
+        appData.setVacationDays(days, for: worker.id)
+        saveAndRecompute()
+    }
+
+    /// Removes a single vacation day.
+    func removeVacationDay(_ date: Date, for worker: Worker) {
+        var days = appData.vacationDays(for: worker.id)
+        days.removeAll { $0.isSameDay(as: date) }
+        appData.setVacationDays(days, for: worker.id)
+        saveAndRecompute()
+    }
+
     // MARK: – Manual assignments
 
     func setManualAssignment(weekStart: Date, workerId: UUID) {

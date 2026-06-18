@@ -6,11 +6,13 @@ struct EditWorkerView: View {
 
     let worker: Worker
     @State private var name: String
+    @State private var fullName: String
     @State private var colorIndex: Int
 
     init(worker: Worker) {
         self.worker = worker
         _name = State(initialValue: worker.name)
+        _fullName = State(initialValue: worker.fullName)
         _colorIndex = State(initialValue: worker.colorIndex)
     }
 
@@ -19,7 +21,11 @@ struct EditWorkerView: View {
             Form {
                 Section("Datos del trabajador") {
                     LabeledContent("Nombre") {
-                        TextField("Nombre", text: $name)
+                        TextField("Nombre corto", text: $name)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    LabeledContent("Nombre completo") {
+                        TextField("Nombre y apellidos", text: $fullName)
                             .multilineTextAlignment(.trailing)
                     }
                 }
@@ -77,6 +83,7 @@ struct EditWorkerView: View {
                     Button("Guardar") {
                         var updated = worker
                         updated.name = name.trimmingCharacters(in: .whitespaces)
+                        updated.fullName = fullName.trimmingCharacters(in: .whitespaces)
                         updated.colorIndex = colorIndex
                         store.updateWorker(updated)
                         dismiss()

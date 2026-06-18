@@ -3,11 +3,13 @@ import SwiftUI
 struct Worker: Identifiable, Codable, Hashable {
     var id: UUID
     var name: String
+    var fullName: String = ""
     var colorIndex: Int
 
-    init(id: UUID = UUID(), name: String, colorIndex: Int = 0) {
+    init(id: UUID = UUID(), name: String, fullName: String = "", colorIndex: Int = 0) {
         self.id = id
         self.name = name
+        self.fullName = fullName
         self.colorIndex = colorIndex
     }
 

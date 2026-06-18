@@ -2,10 +2,11 @@ import Foundation
 
 struct AppData: Codable {
     var workers: [Worker] = []
-    /// Only explicitly overridden weeks (manual or swap). Automatic rotation is not stored.
     var manualAssignments: [GuardAssignment] = []
-    /// Keys are workerId.uuidString for JSON compatibility.
+    /// Manually set vacation days. Keys are workerId.uuidString.
     var vacations: [String: [Date]] = [:]
+    /// Vacation days imported from Bizneo HR. Keys are workerId.uuidString.
+    var bizneoVacations: [String: [Date]] = [:]
     var settings: AppSettings = AppSettings()
     var version: String = "1.0"
 
@@ -16,10 +17,17 @@ struct AppData: Codable {
     mutating func setVacationDays(_ days: [Date], for workerId: UUID) {
         vacations[workerId.uuidString] = days.map { $0.startOfDay }
     }
+
+    func bizneoVacationDays(for workerId: UUID) -> [Date] {
+        bizneoVacations[workerId.uuidString] ?? []
+    }
+
+    mutating func setBizneoVacationDays(_ days: [Date], for workerId: UUID) {
+        bizneoVacations[workerId.uuidString] = days.map { $0.startOfDay }
+    }
 }
 
 struct AppSettings: Codable {
-    /// When active, also blocks the week before a worker's vacation.
     var avoidGuardWeekBeforeVacation: Bool = false
     var scheduleStartDate: Date = {
         let year = Calendar.current.component(.year, from: Date())
@@ -29,4 +37,6 @@ struct AppSettings: Codable {
         let year = Calendar.current.component(.year, from: Date())
         return Calendar.current.date(from: DateComponents(year: year, month: 12, day: 31)) ?? Date()
     }()
+    var bizneoInstance: String = ""
+    var bizneoToken: String = ""
 }

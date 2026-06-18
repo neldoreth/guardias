@@ -8,6 +8,9 @@ struct VacationCalendarView: View {
     @State private var selectionStart: Date? = nil   // add-range mode
     @State private var deleteStart: Date? = nil       // delete-range mode
     @State private var showSettings = false
+    @State private var isSyncing = false
+    @State private var syncError: String? = nil
+    @State private var showSyncError = false
 
     private var yearStart: Date {
         let year = Calendar.current.component(.year, from: store.appData.settings.scheduleStartDate)
@@ -59,15 +62,47 @@ struct VacationCalendarView: View {
         .navigationTitle("Vacaciones — \(worker.name)")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { showSettings = true } label: {
-                    Image(systemName: "gearshape")
+                HStack(spacing: 8) {
+                    if worker.bizneoUserId != nil {
+                        Button {
+                            Task { await syncFromBizneo() }
+                        } label: {
+                            if isSyncing {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Label("Sincronizar Bizneo", systemImage: "arrow.clockwise")
+                            }
+                        }
+                        .disabled(isSyncing)
+                        .help("Importar vacaciones desde Bizneo HR")
+                    }
+
+                    Button { showSettings = true } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .help("Ajustes")
                 }
-                .help("Ajustes")
             }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView().environment(store)
         }
+        .alert("Error al sincronizar", isPresented: $showSyncError, presenting: syncError) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { msg in
+            Text(msg)
+        }
+    }
+
+    private func syncFromBizneo() async {
+        isSyncing = true
+        do {
+            try await store.syncBizneoVacations(for: worker)
+        } catch {
+            syncError = error.localizedDescription
+            showSyncError = true
+        }
+        isSyncing = false
     }
 }
 
@@ -80,6 +115,9 @@ struct VacationLegendCard: View {
         HStack(spacing: 24) {
             LegendSwatch(fill: .red.opacity(0.18), border: .red.opacity(0.45),
                          text: "Vacaciones", textColor: .red)
+            LegendSwatch(fill: .red.opacity(0.40), border: .red.opacity(0.80),
+                         text: "Vacaciones Bizneo", textColor: .red,
+                         icon: "cloud.fill")
             LegendSwatch(fill: worker.color.opacity(0.15), border: worker.color.opacity(0.40),
                          text: "En guardia", textColor: worker.color)
             LegendSwatch(fill: .clear, border: .primary.opacity(0.35),
@@ -105,13 +143,22 @@ struct LegendSwatch: View {
     let border: Color
     let text: String
     let textColor: Color
+    var icon: String? = nil
 
     var body: some View {
         HStack(spacing: 8) {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(fill)
-                .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1.5))
-                .frame(width: 28, height: 24)
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(fill)
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(border, lineWidth: 1.5))
+                    .frame(width: 28, height: 24)
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(2)
+                }
+            }
             Text(text)
                 .font(.callout)
                 .foregroundStyle(textColor)
@@ -268,6 +315,7 @@ struct DayCell: View {
     @Binding var deleteStart: Date?
 
     private var isVacation: Bool { store.isVacation(date, for: worker) }
+    private var isBizneoVacation: Bool { store.isBizneoVacation(date, for: worker) }
     private var isOnGuard: Bool {
         store.assignment(for: date.startOfWeek)?.workerId == worker.id
     }
@@ -277,18 +325,28 @@ struct DayCell: View {
 
     var body: some View {
         Button(action: handleTap) {
-            Text("\(Calendar.current.component(.day, from: date))")
-                .font(.callout)
-                .fontWeight(isToday || isPendingStart || isDeleteStart ? .semibold : .regular)
-                .frame(maxWidth: .infinity)
-                .frame(height: 36)
-                .foregroundStyle(foregroundColor)
-                .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(borderColor, lineWidth: borderWidth)
+            ZStack(alignment: .topTrailing) {
+                Text("\(Calendar.current.component(.day, from: date))")
+                    .font(.callout)
+                    .fontWeight(isToday || isPendingStart || isDeleteStart ? .semibold : .regular)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 36)
+                    .foregroundStyle(foregroundColor)
+                    .background(backgroundColor)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(borderColor, lineWidth: borderWidth)
+                    }
+
+                if isBizneoVacation && !isPendingStart && !isDeleteStart {
+                    Image(systemName: "cloud.fill")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.top, 3)
+                        .padding(.trailing, 3)
                 }
+            }
         }
         .buttonStyle(.plain)
         .contextMenu {
@@ -297,7 +355,7 @@ struct DayCell: View {
                     store.removeVacationDay(date, for: worker)
                     deleteStart = nil
                 } label: {
-                    Label("Eliminar este día", systemImage: "trash")
+                    Label("Eliminar este día (manual)", systemImage: "trash")
                 }
             }
             if isPendingStart {
@@ -342,7 +400,9 @@ struct DayCell: View {
 
         // Start a new selection
         if isVacation {
-            deleteStart = date      // vacation day → delete-range mode (red banner)
+            deleteStart = date      // manual vacation → delete-range mode (red banner)
+        } else if isBizneoVacation {
+            // Bizneo-only day: read-only, cannot be manually deleted
         } else {
             selectionStart = date   // free day → add-range mode (blue banner)
         }
@@ -353,6 +413,7 @@ struct DayCell: View {
     private var foregroundColor: Color {
         if isPendingStart { return .white }
         if isDeleteStart { return .red }
+        if isBizneoVacation { return .red }
         if isVacation { return .red }
         if isOnGuard { return worker.color }
         return .primary
@@ -361,6 +422,7 @@ struct DayCell: View {
     private var backgroundColor: Color {
         if isPendingStart { return .blue }
         if isDeleteStart { return .red.opacity(0.28) }
+        if isBizneoVacation { return .red.opacity(0.40) }
         if isVacation { return .red.opacity(0.18) }
         if isOnGuard { return worker.color.opacity(0.15) }
         return .clear
@@ -369,6 +431,7 @@ struct DayCell: View {
     private var borderColor: Color {
         if isPendingStart { return .blue }
         if isDeleteStart { return .red }
+        if isBizneoVacation { return .red.opacity(0.80) }
         if isToday { return .primary.opacity(0.35) }
         if isVacation { return .red.opacity(0.35) }
         if isOnGuard { return worker.color.opacity(0.3) }
@@ -377,6 +440,7 @@ struct DayCell: View {
 
     private var borderWidth: CGFloat {
         if isPendingStart || isDeleteStart || isToday { return 2 }
+        if isBizneoVacation { return 1.5 }
         if isVacation || isOnGuard { return 1 }
         return 0
     }

@@ -12,6 +12,7 @@ struct SettingsView: View {
                 workersSection
                 guardSettingsSection
                 scheduleRangeSection
+                bizneoSection
                 aboutSection
             }
             .formStyle(.grouped)
@@ -22,7 +23,7 @@ struct SettingsView: View {
                 }
             }
         }
-        .frame(minWidth: 460, idealWidth: 500, minHeight: 500)
+        .frame(minWidth: 460, idealWidth: 500, minHeight: 600)
         .sheet(item: $workerToEdit) { worker in
             EditWorkerView(worker: worker)
                 .environment(store)
@@ -108,6 +109,42 @@ struct SettingsView: View {
                 in: store.appData.settings.scheduleStartDate...,
                 displayedComponents: .date
             )
+        }
+    }
+
+    private var bizneoSection: some View {
+        Section {
+            LabeledContent("Instancia") {
+                TextField("empresa", text: Binding(
+                    get: { store.appData.settings.bizneoInstance },
+                    set: {
+                        var s = store.appData.settings
+                        s.bizneoInstance = $0.trimmingCharacters(in: .whitespaces)
+                        store.updateSettings(s)
+                    }
+                ))
+                .multilineTextAlignment(.trailing)
+            }
+            LabeledContent("Token API") {
+                SecureField("Token de acceso", text: Binding(
+                    get: { store.appData.settings.bizneoToken },
+                    set: {
+                        var s = store.appData.settings
+                        s.bizneoToken = $0.trimmingCharacters(in: .whitespaces)
+                        store.updateSettings(s)
+                    }
+                ))
+                .multilineTextAlignment(.trailing)
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "cloud.fill")
+                Text("Bizneo HR")
+            }
+        } footer: {
+            Text("Introduce la instancia (p.ej. «alzis») y el token de tu cuenta Bizneo. Después vincula cada trabajador a su usuario Bizneo desde Ajustes → Editar trabajador.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

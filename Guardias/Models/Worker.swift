@@ -5,12 +5,17 @@ struct Worker: Identifiable, Codable, Hashable {
     var name: String
     var fullName: String = ""
     var colorIndex: Int
+    var bizneoUserId: Int? = nil
+    var bizneoUserName: String = ""
 
-    init(id: UUID = UUID(), name: String, fullName: String = "", colorIndex: Int = 0) {
+    init(id: UUID = UUID(), name: String, fullName: String = "", colorIndex: Int = 0,
+         bizneoUserId: Int? = nil, bizneoUserName: String = "") {
         self.id = id
         self.name = name
         self.fullName = fullName
         self.colorIndex = colorIndex
+        self.bizneoUserId = bizneoUserId
+        self.bizneoUserName = bizneoUserName
     }
 
     // MARK: – Color palette

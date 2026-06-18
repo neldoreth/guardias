@@ -43,7 +43,9 @@ final class GuardiasStore {
     func recompute() {
         let vacations = Dictionary(
             uniqueKeysWithValues: appData.workers.map { worker in
-                (worker.id, appData.vacationDays(for: worker.id))
+                let manual = Set(appData.vacationDays(for: worker.id).map { $0.startOfDay })
+                let bizneo = Set(appData.bizneoVacationDays(for: worker.id).map { $0.startOfDay })
+                return (worker.id, Array(manual.union(bizneo)))
             }
         )
         schedule = SchedulingEngine.compute(
@@ -84,6 +86,7 @@ final class GuardiasStore {
         appData.workers.removeAll { $0.id == worker.id }
         appData.manualAssignments.removeAll { $0.workerId == worker.id }
         appData.vacations.removeValue(forKey: worker.id.uuidString)
+        appData.bizneoVacations.removeValue(forKey: worker.id.uuidString)
         saveAndRecompute()
     }
 
@@ -117,6 +120,10 @@ final class GuardiasStore {
 
     func isVacation(_ date: Date, for worker: Worker) -> Bool {
         appData.vacationDays(for: worker.id).contains { $0.isSameDay(as: date) }
+    }
+
+    func isBizneoVacation(_ date: Date, for worker: Worker) -> Bool {
+        appData.bizneoVacationDays(for: worker.id).contains { $0.isSameDay(as: date) }
     }
 
     /// Adds all days in [startDate, endDate] as vacation (inclusive). Safe to call with startDate == endDate.
@@ -156,6 +163,28 @@ final class GuardiasStore {
         saveAndRecompute()
     }
 
+    // MARK: – Bizneo sync
+
+    func syncBizneoVacations(for worker: Worker) async throws {
+        let instance = appData.settings.bizneoInstance
+        let token = appData.settings.bizneoToken
+        guard !instance.isEmpty, !token.isEmpty else {
+            throw BizneoSyncError.notConfigured
+        }
+        guard let userId = worker.bizneoUserId else {
+            throw BizneoSyncError.noUserLinked
+        }
+        let days = try await BizneoService.fetchVacationDays(
+            userId: userId,
+            from: appData.settings.scheduleStartDate,
+            to: appData.settings.scheduleEndDate,
+            instance: instance,
+            token: token
+        )
+        appData.setBizneoVacationDays(days, for: worker.id)
+        saveAndRecompute()
+    }
+
     // MARK: – Manual assignments
 
     func setManualAssignment(weekStart: Date, workerId: UUID) {
@@ -189,8 +218,6 @@ final class GuardiasStore {
         saveAndRecompute()
     }
 
-    // MARK: – Drag-and-drop week swap
-
     /// Swaps the guard assignments of two weeks. Both become manual overrides.
     func swapWeeks(sourceWeek: Date, targetWeek: Date) {
         let src = assignment(for: sourceWeek)
@@ -202,7 +229,6 @@ final class GuardiasStore {
         }
 
         if let fromId = src?.workerId, let toId = tgt?.workerId {
-            // Full mutual swap
             appData.manualAssignments.append(GuardAssignment(
                 weekStart: sourceWeek, workerId: toId, isManual: true,
                 swapInfo: .init(originalWorkerId: fromId, newWorkerId: toId, swapDate: swapDate)
@@ -212,7 +238,6 @@ final class GuardiasStore {
                 swapInfo: .init(originalWorkerId: toId, newWorkerId: fromId, swapDate: swapDate)
             ))
         } else if let fromId = src?.workerId {
-            // Move source worker to target week
             appData.manualAssignments.append(GuardAssignment(
                 weekStart: targetWeek, workerId: fromId, isManual: true
             ))
@@ -256,5 +281,19 @@ final class GuardiasStore {
     private func saveAndRecompute() {
         save()
         recompute()
+    }
+}
+
+// MARK: – Errors
+
+enum BizneoSyncError: LocalizedError {
+    case notConfigured
+    case noUserLinked
+
+    var errorDescription: String? {
+        switch self {
+        case .notConfigured: return "Configura la instancia y el token de Bizneo en Ajustes."
+        case .noUserLinked: return "Vincula este trabajador a un usuario de Bizneo en sus ajustes."
+        }
     }
 }

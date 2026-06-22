@@ -163,6 +163,69 @@ final class GuardiasStore {
         saveAndRecompute()
     }
 
+    // MARK: – Microsoft 365 sync
+
+    func isM365Synced(weekStart: Date) -> Bool {
+        appData.m365SyncedWeeks[isoWeekKey(weekStart)] != nil
+    }
+
+    func syncWeekToM365(weekStart: Date) async throws {
+        guard let assign = assignment(for: weekStart),
+              let worker = worker(id: assign.workerId) else {
+            throw M365Error.noAssignment
+        }
+        let token = try await validM365AccessToken()
+        let calId = appData.settings.m365CalendarId
+        guard !calId.isEmpty else { throw M365Error.calendarNotFound(appData.settings.m365CalendarName) }
+        let eventId = try await M365Service.createWeekEvent(
+            weekStart: weekStart.startOfWeek,
+            workerName: worker.name,
+            calendarId: calId,
+            accessToken: token
+        )
+        appData.m365SyncedWeeks[isoWeekKey(weekStart)] = eventId
+        save()
+    }
+
+    func unsyncWeekFromM365(weekStart: Date) async throws {
+        let key = isoWeekKey(weekStart)
+        guard let eventId = appData.m365SyncedWeeks[key] else { return }
+        let token = try await validM365AccessToken()
+        try await M365Service.deleteEvent(eventId: eventId, accessToken: token)
+        appData.m365SyncedWeeks.removeValue(forKey: key)
+        save()
+    }
+
+    /// Returns a valid access token, refreshing if it's expired or close to expiry.
+    func validM365AccessToken() async throws -> String {
+        let s = appData.settings
+        guard s.m365IsConnected else { throw M365Error.notConnected }
+        if !s.m365AccessToken.isEmpty,
+           let expiry = s.m365TokenExpiresAt,
+           expiry.timeIntervalSinceNow > 300 {
+            return s.m365AccessToken
+        }
+        let (newAccess, newRefresh, expiresIn) = try await M365Service.refreshAccessToken(
+            refreshToken: s.m365RefreshToken,
+            clientId: s.m365ClientId,
+            tenantId: s.m365TenantId
+        )
+        var updated = appData.settings
+        updated.m365AccessToken = newAccess
+        updated.m365RefreshToken = newRefresh
+        updated.m365TokenExpiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
+        appData.settings = updated
+        save()
+        return newAccess
+    }
+
+    private func isoWeekKey(_ date: Date) -> String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+        return fmt.string(from: date.startOfWeek)
+    }
+
     // MARK: – Bizneo sync
 
     func syncBizneoVacations(for worker: Worker) async throws {

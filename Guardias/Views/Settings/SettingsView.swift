@@ -5,6 +5,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var newWorkerName = ""
     @State private var workerToEdit: Worker? = nil
+    @State private var showM365Connect = false
 
     var body: some View {
         NavigationStack {
@@ -13,6 +14,7 @@ struct SettingsView: View {
                 guardSettingsSection
                 scheduleRangeSection
                 bizneoSection
+                m365Section
                 aboutSection
             }
             .formStyle(.grouped)
@@ -26,6 +28,10 @@ struct SettingsView: View {
         .frame(minWidth: 460, idealWidth: 500, minHeight: 600)
         .sheet(item: $workerToEdit) { worker in
             EditWorkerView(worker: worker)
+                .environment(store)
+        }
+        .sheet(isPresented: $showM365Connect) {
+            M365ConnectView()
                 .environment(store)
         }
     }
@@ -145,6 +151,48 @@ struct SettingsView: View {
             Text("Introduce la instancia (p.ej. «alzis») y el token de tu cuenta Bizneo. Después vincula cada trabajador a su usuario Bizneo desde Ajustes → Editar trabajador.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        }
+    }
+
+    private var m365Section: some View {
+        Section {
+            if store.appData.settings.m365IsConnected {
+                LabeledContent("Cuenta") {
+                    Text(store.appData.settings.m365UserEmail)
+                        .foregroundStyle(.secondary)
+                }
+                LabeledContent("Calendario") {
+                    Text(store.appData.settings.m365CalendarName)
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Circle().fill(.green).frame(width: 8, height: 8)
+                    Text("Conectado")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cambiar…") { showM365Connect = true }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.blue)
+                }
+            } else {
+                HStack {
+                    Text("No conectado")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Configurar…") { showM365Connect = true }
+                }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.plus")
+                Text("Microsoft 365")
+            }
+        } footer: {
+            if !store.appData.settings.m365IsConnected {
+                Text("Conecta con Microsoft 365 para sincronizar guardias con el calendario configurado.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 

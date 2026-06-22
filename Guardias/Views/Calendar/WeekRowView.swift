@@ -8,10 +8,15 @@ struct WeekRowView: View {
     @State private var showManualAssign = false
     @State private var showSwap = false
     @State private var isDropTargeted = false
+    @State private var isSyncing = false
+    @State private var syncError: String? = nil
+    @State private var showSyncError = false
 
     private var assignment: GuardAssignment? { store.assignment(for: weekStart) }
     private var worker: Worker? { assignment.flatMap { store.worker(id: $0.workerId) } }
     private var isCurrentWeek: Bool { Date().isSameWeek(as: weekStart) }
+    private var isSynced: Bool { store.isM365Synced(weekStart: weekStart) }
+    private var canSync: Bool { store.appData.settings.m365IsConnected && worker != nil }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -34,6 +39,27 @@ struct WeekRowView: View {
             }
 
             Spacer()
+
+            // M365 sync button
+            if canSync || isSynced {
+                Button {
+                    Task { await toggleSync() }
+                } label: {
+                    if isSyncing {
+                        ProgressView().controlSize(.mini)
+                            .frame(width: 16, height: 16)
+                    } else if isSynced {
+                        Image(systemName: "cloud.fill")
+                            .foregroundStyle(.blue)
+                    } else {
+                        Image(systemName: "cloud")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isSyncing)
+                .help(isSynced ? "Sincronizado con M365 — clic para eliminar del calendario" : "Sincronizar semana con Microsoft 365")
+            }
 
             if isCurrentWeek {
                 Image(systemName: "clock.fill")
@@ -66,7 +92,7 @@ struct WeekRowView: View {
         }
         // ── Drop target ───────────────────────────────────────────────────
         .onDrop(of: [.plainText], isTargeted: $isDropTargeted, perform: handleDrop)
-        // ── Context menu (kept alongside drag) ────────────────────────────
+        // ── Context menu ──────────────────────────────────────────────────
         .contextMenu {
             Button {
                 showManualAssign = true
@@ -88,6 +114,23 @@ struct WeekRowView: View {
                     Label("Eliminar asignación manual", systemImage: "trash")
                 }
             }
+
+            if canSync || isSynced {
+                Divider()
+                if isSynced {
+                    Button(role: .destructive) {
+                        Task { await toggleSync() }
+                    } label: {
+                        Label("Eliminar del calendario M365", systemImage: "cloud.slash")
+                    }
+                } else {
+                    Button {
+                        Task { await toggleSync() }
+                    } label: {
+                        Label("Sincronizar con M365…", systemImage: "cloud.badge.plus")
+                    }
+                }
+            }
         }
         .sheet(isPresented: $showManualAssign) {
             ManualAssignSheet(weekStart: weekStart)
@@ -97,6 +140,28 @@ struct WeekRowView: View {
             SwapGuardSheet(weekStart: weekStart, currentWorkerId: assignment?.workerId)
                 .environment(store)
         }
+        .alert("Error al sincronizar con M365", isPresented: $showSyncError, presenting: syncError) { _ in
+            Button("OK", role: .cancel) {}
+        } message: { msg in
+            Text(msg)
+        }
+    }
+
+    // MARK: – Sync toggle
+
+    private func toggleSync() async {
+        isSyncing = true
+        do {
+            if isSynced {
+                try await store.unsyncWeekFromM365(weekStart: weekStart)
+            } else {
+                try await store.syncWeekToM365(weekStart: weekStart)
+            }
+        } catch {
+            syncError = error.localizedDescription
+            showSyncError = true
+        }
+        isSyncing = false
     }
 
     // MARK: – Drag-and-drop handler

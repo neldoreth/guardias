@@ -142,6 +142,7 @@ struct GridWeekRow: View {
     private var assignment: GuardAssignment? { store.assignment(for: weekStart) }
     private var worker: Worker? { assignment.flatMap { store.worker(id: $0.workerId) } }
     private var isCurrentWeek: Bool { Date().isSameWeek(as: weekStart) }
+    private var isSynced: Bool { store.isM365Synced(weekStart: weekStart) }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -177,6 +178,14 @@ struct GridWeekRow: View {
             if isCurrentWeek {
                 RoundedRectangle(cornerRadius: 4)
                     .strokeBorder(.primary.opacity(0.25), lineWidth: 1.5)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if isSynced {
+                Image(systemName: "cloud.fill")
+                    .font(.system(size: 7))
+                    .foregroundStyle(.blue.opacity(0.85))
+                    .padding(2)
             }
         }
     }

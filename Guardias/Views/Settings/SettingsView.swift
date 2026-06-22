@@ -189,7 +189,7 @@ struct SettingsView: View {
             }
         } footer: {
             if !store.appData.settings.m365IsConnected {
-                Text("Conecta con Microsoft 365 para sincronizar guardias con el calendario configurado.")
+                Text("Conecta con Microsoft 365 para sincronizar guardias con un calendario de tu cuenta.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

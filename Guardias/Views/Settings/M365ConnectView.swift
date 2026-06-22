@@ -1,28 +1,41 @@
 import SwiftUI
 import AppKit
 
+// MARK: – View state machine
+
+private enum ConnectState {
+    case config
+    case awaitingCode(M365DeviceCodeInfo)
+    case pickingCalendar(accessToken: String, refreshToken: String, expiresIn: Int, calendars: [M365Calendar])
+    case connected
+}
+
 struct M365ConnectView: View {
     @Environment(GuardiasStore.self) private var store
     @Environment(\.dismiss) private var dismiss
 
     @State private var clientId = ""
     @State private var tenantId = ""
-    @State private var calendarName = "Guardias ClickEZ"
 
-    @State private var isConnecting = false
-    @State private var deviceCodeInfo: M365DeviceCodeInfo? = nil
+    @State private var state: ConnectState = .config
     @State private var pollTask: Task<Void, Never>? = nil
-    @State private var errorMessage: String? = nil
     @State private var statusMessage = ""
+    @State private var errorMessage: String? = nil
 
     var body: some View {
         NavigationStack {
             Form {
-                if store.appData.settings.m365IsConnected {
+                switch state {
+                case .connected:
                     connectedSection
-                } else if isConnecting, let info = deviceCodeInfo {
-                    connectingSection(info)
-                } else {
+                case .awaitingCode(let info):
+                    awaitingCodeSection(info)
+                case .pickingCalendar(let access, let refresh, let expiresIn, let calendars):
+                    calendarPickerSection(
+                        accessToken: access, refreshToken: refresh,
+                        expiresIn: expiresIn, calendars: calendars
+                    )
+                case .config:
                     configSection
                 }
 
@@ -47,7 +60,7 @@ struct M365ConnectView: View {
             let s = store.appData.settings
             clientId = s.m365ClientId
             tenantId = s.m365TenantId
-            calendarName = s.m365CalendarName.isEmpty ? "Guardias ClickEZ" : s.m365CalendarName
+            if s.m365IsConnected { state = .connected }
         }
         .onDisappear { pollTask?.cancel() }
     }
@@ -67,28 +80,27 @@ struct M365ConnectView: View {
             LabeledContent("Estado") {
                 HStack(spacing: 6) {
                     Circle().fill(.green).frame(width: 8, height: 8)
-                    Text("Conectado")
-                        .foregroundStyle(.secondary)
+                    Text("Conectado").foregroundStyle(.secondary)
                 }
             }
             Button("Desconectar", role: .destructive) {
                 var s = store.appData.settings
-                s.m365AccessToken = ""
-                s.m365RefreshToken = ""
-                s.m365UserEmail = ""
-                s.m365CalendarId = ""
+                s.m365AccessToken    = ""
+                s.m365RefreshToken   = ""
+                s.m365UserEmail      = ""
+                s.m365CalendarId     = ""
+                s.m365CalendarName   = ""
                 s.m365TokenExpiresAt = nil
                 store.updateSettings(s)
+                state = .config
             }
-        } header: {
-            Text("Cuenta Microsoft 365")
-        }
+        } header: { Text("Cuenta Microsoft 365") }
     }
 
-    // MARK: – Connecting (device code)
+    // MARK: – Awaiting device code authorization
 
     @ViewBuilder
-    private func connectingSection(_ info: M365DeviceCodeInfo) -> some View {
+    private func awaitingCodeSection(_ info: M365DeviceCodeInfo) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 14) {
                 Text("Abre el siguiente enlace en tu navegador e introduce el código:")
@@ -124,9 +136,7 @@ struct M365ConnectView: View {
                 .foregroundStyle(.blue)
             }
             .padding(.vertical, 6)
-        } header: {
-            Text("Autorización pendiente")
-        }
+        } header: { Text("Autorización pendiente") }
 
         Section {
             HStack(spacing: 10) {
@@ -137,8 +147,7 @@ struct M365ConnectView: View {
                 Spacer()
                 Button("Cancelar") {
                     pollTask?.cancel()
-                    isConnecting = false
-                    deviceCodeInfo = nil
+                    state = .config
                     statusMessage = ""
                 }
                 .buttonStyle(.bordered)
@@ -146,7 +155,48 @@ struct M365ConnectView: View {
         }
     }
 
-    // MARK: – Not connected (config form)
+    // MARK: – Calendar picker
+
+    @ViewBuilder
+    private func calendarPickerSection(
+        accessToken: String, refreshToken: String, expiresIn: Int, calendars: [M365Calendar]
+    ) -> some View {
+        Section {
+            ForEach(calendars) { calendar in
+                Button {
+                    Task { await selectCalendar(calendar, accessToken: accessToken,
+                                                refreshToken: refreshToken, expiresIn: expiresIn) }
+                } label: {
+                    HStack {
+                        Image(systemName: "calendar")
+                            .foregroundStyle(.blue)
+                            .frame(width: 24)
+                        Text(calendar.name)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        } header: {
+            Text("Selecciona un calendario")
+        } footer: {
+            Text("Elige el calendario de Microsoft 365 donde se sincronizarán las semanas de guardia.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+
+        Section {
+            Button("Cancelar", role: .cancel) {
+                state = .config
+            }
+        }
+    }
+
+    // MARK: – Config form
 
     private var configSection: some View {
         Group {
@@ -157,10 +207,6 @@ struct M365ConnectView: View {
                 }
                 LabeledContent("Tenant ID") {
                     TextField("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", text: $tenantId)
-                        .multilineTextAlignment(.trailing)
-                }
-                LabeledContent("Calendario") {
-                    TextField("Guardias ClickEZ", text: $calendarName)
                         .multilineTextAlignment(.trailing)
                 }
             } header: {
@@ -186,23 +232,17 @@ struct M365ConnectView: View {
     private func startConnection() async {
         let cId = clientId.trimmingCharacters(in: .whitespaces)
         let tId = tenantId.trimmingCharacters(in: .whitespaces)
-        let calName = calendarName.trimmingCharacters(in: .whitespaces).isEmpty
-                      ? "Guardias ClickEZ"
-                      : calendarName.trimmingCharacters(in: .whitespaces)
 
         errorMessage = nil
-        isConnecting = true
 
         do {
             let info = try await M365Service.startDeviceCodeFlow(clientId: cId, tenantId: tId)
-            deviceCodeInfo = info
+            state = .awaitingCode(info)
 
-            // Open browser automatically
             if let url = URL(string: info.verificationUri) {
                 NSWorkspace.shared.open(url)
             }
 
-            // Poll until authorized or cancelled
             pollTask = Task {
                 var interval = 5
                 while !Task.isCancelled {
@@ -215,60 +255,70 @@ struct M365ConnectView: View {
                         switch result {
                         case .pending:
                             break
-                        case .success(let access, let refresh, let expiresIn):
-                            await finishConnection(
-                                accessToken: access, refreshToken: refresh,
-                                expiresIn: expiresIn, clientId: cId, tenantId: tId,
-                                calendarName: calName
-                            )
+                        case .success(let access, let refresh, let expires):
+                            await afterAuth(accessToken: access, refreshToken: refresh,
+                                            expiresIn: expires, clientId: cId, tenantId: tId)
                             return
                         }
                     } catch {
                         await MainActor.run {
                             errorMessage = error.localizedDescription
-                            isConnecting = false
-                            deviceCodeInfo = nil
+                            state = .config
                         }
                         return
                     }
-                    interval = min(interval + 1, 15) // slow down over time
+                    interval = min(interval + 1, 15)
                 }
             }
         } catch {
             errorMessage = error.localizedDescription
-            isConnecting = false
         }
     }
 
     @MainActor
-    private func finishConnection(
+    private func afterAuth(
         accessToken: String, refreshToken: String, expiresIn: Int,
-        clientId: String, tenantId: String, calendarName: String
+        clientId: String, tenantId: String
     ) async {
-        statusMessage = "Autenticado. Buscando calendario…"
+        statusMessage = "Autenticado. Obteniendo calendarios…"
         do {
-            let email  = try await M365Service.fetchUserEmail(accessToken: accessToken)
-            let calId  = try await M365Service.findCalendarId(named: calendarName, accessToken: accessToken)
-
+            // Save clientId/tenantId and tokens early (needed for refresh later)
             var s = store.appData.settings
             s.m365ClientId       = clientId
             s.m365TenantId       = tenantId
-            s.m365CalendarName   = calendarName
             s.m365AccessToken    = accessToken
             s.m365RefreshToken   = refreshToken
             s.m365TokenExpiresAt = Date().addingTimeInterval(TimeInterval(expiresIn))
-            s.m365UserEmail      = email
-            s.m365CalendarId     = calId
             store.updateSettings(s)
 
-            isConnecting = false
-            deviceCodeInfo = nil
+            let email     = try await M365Service.fetchUserEmail(accessToken: accessToken)
+            let calendars = try await M365Service.fetchCalendars(accessToken: accessToken)
+
+            var s2 = store.appData.settings
+            s2.m365UserEmail = email
+            store.updateSettings(s2)
+
             statusMessage = ""
+            state = .pickingCalendar(
+                accessToken: accessToken, refreshToken: refreshToken,
+                expiresIn: expiresIn, calendars: calendars
+            )
         } catch {
             errorMessage = error.localizedDescription
-            isConnecting = false
-            deviceCodeInfo = nil
+            state = .config
             statusMessage = ""
         }
+    }
+
+    @MainActor
+    private func selectCalendar(
+        _ calendar: M365Calendar,
+        accessToken: String, refreshToken: String, expiresIn: Int
+    ) async {
+        var s = store.appData.settings
+        s.m365CalendarId   = calendar.id
+        s.m365CalendarName = calendar.name
+        store.updateSettings(s)
+        state = .connected
     }
 }

@@ -2,6 +2,11 @@ import Foundation
 
 // MARK: – Data types
 
+struct M365Calendar: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
 struct M365DeviceCodeInfo {
     let deviceCode: String
     let userCode: String
@@ -140,20 +145,24 @@ enum M365Service {
         return (json["mail"] as? String) ?? (json["userPrincipalName"] as? String) ?? ""
     }
 
-    static func findCalendarId(named name: String, accessToken: String) async throws -> String {
-        let url = URL(string: "\(graphBase)/me/calendars?$select=id,name")!
+    static func fetchCalendars(accessToken: String) async throws -> [M365Calendar] {
+        let url = URL(string: "\(graphBase)/me/calendars?$select=id,name&$top=50")!
         var req = URLRequest(url: url)
         req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard code == 200 else {
+            let errJson = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+            let msg = (errJson["error"] as? [String: Any])?["message"] as? String
+                      ?? "Error al obtener calendarios (HTTP \(code))"
+            throw M365Error.apiError(code, msg)
+        }
         let json = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
         let cals = json["value"] as? [[String: Any]] ?? []
-        guard let cal = cals.first(where: {
-                  ($0["name"] as? String)?.caseInsensitiveCompare(name) == .orderedSame
-              }),
-              let id = cal["id"] as? String else {
-            throw M365Error.calendarNotFound(name)
+        return cals.compactMap { cal in
+            guard let id = cal["id"] as? String, let name = cal["name"] as? String else { return nil }
+            return M365Calendar(id: id, name: name)
         }
-        return id
     }
 
     // MARK: Calendar events
